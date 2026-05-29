@@ -1,11 +1,35 @@
 from typing import Dict, List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+import legal
+from input_validator import validate_card, validate_iterations, validate_seven_cards
+from rate_limit import rate_limit_dependency
+from security import create_access_token, get_password_hash, verify_password
 
 
 app = FastAPI(title="GTO Solver API", version="0.1.0")
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,6 +38,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(legal.router)
 
 
 class TrainRequest(BaseModel):
@@ -43,6 +69,11 @@ class PreflopResponse(BaseModel):
     group_id: int
 
 
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+
+
 HAND_RANK_NAMES = [
     "High Card",
     "One Pair",
@@ -56,6 +87,8 @@ HAND_RANK_NAMES = [
 ]
 
 MOCK = {"J": [0.67, 0.33], "Q": [1.0, 0.0], "K": [0.0, 1.0]}
+DEMO_USERNAME = "demo"
+DEMO_PASSWORD_HASH = get_password_hash("gto2024")
 
 
 @app.get("/health")
@@ -63,8 +96,31 @@ def health() -> dict[str, str]:
     return {"status": "ok", "version": "0.1.0"}
 
 
-@app.post("/api/v1/solve/kuhn-cfr", response_model=StrategyResponse)
+@app.post("/api/v1/auth/token", response_model=TokenResponse)
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+) -> TokenResponse:
+    if form_data.username != DEMO_USERNAME or not verify_password(
+        form_data.password, DEMO_PASSWORD_HASH
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token = create_access_token(data={"sub": form_data.username})
+    return TokenResponse(access_token=access_token, token_type="bearer")
+
+
+@app.post(
+    "/api/v1/solve/kuhn-cfr",
+    response_model=StrategyResponse,
+    dependencies=[Depends(rate_limit_dependency)],
+)
 def solve_kuhn_cfr(request: TrainRequest) -> StrategyResponse:
+    validate_iterations(request.iterations)
+
     try:
         import gto_solver
 
@@ -75,8 +131,14 @@ def solve_kuhn_cfr(request: TrainRequest) -> StrategyResponse:
     return StrategyResponse(strategies=strategies, iterations=request.iterations)
 
 
-@app.post("/api/v1/solve/kuhn-cfr-plus", response_model=StrategyResponse)
+@app.post(
+    "/api/v1/solve/kuhn-cfr-plus",
+    response_model=StrategyResponse,
+    dependencies=[Depends(rate_limit_dependency)],
+)
 def solve_kuhn_cfr_plus(request: TrainRequest) -> StrategyResponse:
+    validate_iterations(request.iterations)
+
     try:
         import gto_solver
 
@@ -87,10 +149,13 @@ def solve_kuhn_cfr_plus(request: TrainRequest) -> StrategyResponse:
     return StrategyResponse(strategies=strategies, iterations=request.iterations)
 
 
-@app.post("/api/v1/evaluate/hand", response_model=HandEvalResponse)
+@app.post(
+    "/api/v1/evaluate/hand",
+    response_model=HandEvalResponse,
+    dependencies=[Depends(rate_limit_dependency)],
+)
 def evaluate_hand(request: HandEvalRequest) -> HandEvalResponse:
-    if len(request.cards) != 7:
-        raise HTTPException(status_code=400, detail="Need 7 cards")
+    validate_seven_cards(request.cards)
 
     try:
         import gto_solver
@@ -102,8 +167,15 @@ def evaluate_hand(request: HandEvalRequest) -> HandEvalResponse:
     return HandEvalResponse(rank=rank, rank_name=HAND_RANK_NAMES[rank])
 
 
-@app.post("/api/v1/classify/preflop", response_model=PreflopResponse)
+@app.post(
+    "/api/v1/classify/preflop",
+    response_model=PreflopResponse,
+    dependencies=[Depends(rate_limit_dependency)],
+)
 def classify_preflop(request: PreflopRequest) -> PreflopResponse:
+    validate_card(request.card1)
+    validate_card(request.card2)
+
     try:
         import gto_solver
 
