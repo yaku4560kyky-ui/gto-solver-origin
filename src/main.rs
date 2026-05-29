@@ -1,3 +1,6 @@
+mod cfr;
+mod cfr_plus;
+
 use std::fmt;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -254,6 +257,14 @@ impl GameState {
 }
 
 fn main() {
+    let cfr_nodes = cfr::train(100_000);
+    println!("Vanilla Kuhn CFR average strategies:");
+    print_kuhn_strategies(&cfr_nodes);
+
+    let cfr_plus_nodes = cfr_plus::train(100_000);
+    println!("\nKuhn CFR+ average strategies:");
+    print_kuhn_plus_strategies(&cfr_plus_nodes);
+
     // --- Deck デモ ---
     let mut deck = Deck::new();
     println!("Deck: {} cards", deck.remaining());
@@ -278,6 +289,24 @@ fn main() {
     let mut gs = GameState::new(6, 10000);
     gs.apply_action(&Action::Raise(300), 0);
     println!("\nAfter Raise(300): pot={}, stack[0]={}", gs.pot, gs.stacks[0]);
+}
+
+fn print_kuhn_strategies(nodes: &std::collections::HashMap<String, cfr::KuhnNode>) {
+    let mut keys: Vec<&String> = nodes.keys().collect();
+    keys.sort();
+    for key in keys {
+        let strategy = nodes[key].get_average_strategy();
+        println!("  {}: pass={:.3}, bet={:.3}", key, strategy[0], strategy[1]);
+    }
+}
+
+fn print_kuhn_plus_strategies(nodes: &std::collections::HashMap<String, cfr_plus::KuhnNode>) {
+    let mut keys: Vec<&String> = nodes.keys().collect();
+    keys.sort();
+    for key in keys {
+        let strategy = nodes[key].get_average_strategy();
+        println!("  {}: pass={:.3}, bet={:.3}", key, strategy[0], strategy[1]);
+    }
 }
 
 #[cfg(test)]
