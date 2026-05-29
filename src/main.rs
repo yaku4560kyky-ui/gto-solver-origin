@@ -1,9 +1,12 @@
 mod cfr;
 mod cfr_plus;
+mod dcfr;
+mod dcfr_parallel;
+mod leduc;
 
-use std::fmt;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Suit {
@@ -45,25 +48,25 @@ impl Card {
 impl fmt::Display for Card {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rank_str = match self.rank {
-            Rank::Ace   => "A",
-            Rank::King  => "K",
+            Rank::Ace => "A",
+            Rank::King => "K",
             Rank::Queen => "Q",
-            Rank::Jack  => "J",
-            Rank::Ten   => "T",
-            Rank::Nine  => "9",
+            Rank::Jack => "J",
+            Rank::Ten => "T",
+            Rank::Nine => "9",
             Rank::Eight => "8",
             Rank::Seven => "7",
-            Rank::Six   => "6",
-            Rank::Five  => "5",
-            Rank::Four  => "4",
+            Rank::Six => "6",
+            Rank::Five => "5",
+            Rank::Four => "4",
             Rank::Three => "3",
-            Rank::Two   => "2",
+            Rank::Two => "2",
         };
         let suit_str = match self.suit {
-            Suit::Spade   => "s",
-            Suit::Heart   => "h",
+            Suit::Spade => "s",
+            Suit::Heart => "h",
             Suit::Diamond => "d",
-            Suit::Club    => "c",
+            Suit::Club => "c",
         };
         write!(f, "{}{}", rank_str, suit_str)
     }
@@ -96,6 +99,7 @@ impl fmt::Display for Hand {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 enum Action {
     Fold,
     Check,
@@ -107,16 +111,17 @@ enum Action {
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Action::Fold     => write!(f, "Fold"),
-            Action::Check    => write!(f, "Check"),
-            Action::Call     => write!(f, "Call"),
+            Action::Fold => write!(f, "Fold"),
+            Action::Check => write!(f, "Check"),
+            Action::Call => write!(f, "Call"),
             Action::Raise(n) => write!(f, "Raise({})", n),
-            Action::AllIn    => write!(f, "AllIn"),
+            Action::AllIn => write!(f, "AllIn"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum Street {
     Preflop,
     Flop,
@@ -126,6 +131,7 @@ enum Street {
 
 // 6-maxポジション
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum Position {
     UTG,
     HJ,
@@ -139,11 +145,11 @@ impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             Position::UTG => "UTG",
-            Position::HJ  => "HJ",
-            Position::CO  => "CO",
+            Position::HJ => "HJ",
+            Position::CO => "CO",
             Position::BTN => "BTN",
-            Position::SB  => "SB",
-            Position::BB  => "BB",
+            Position::SB => "SB",
+            Position::BB => "BB",
         };
         write!(f, "{}", s)
     }
@@ -164,9 +170,19 @@ impl Deck {
     fn new() -> Self {
         let suits = [Suit::Club, Suit::Diamond, Suit::Heart, Suit::Spade];
         let ranks = [
-            Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
-            Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
-            Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
+            Rank::Two,
+            Rank::Three,
+            Rank::Four,
+            Rank::Five,
+            Rank::Six,
+            Rank::Seven,
+            Rank::Eight,
+            Rank::Nine,
+            Rank::Ten,
+            Rank::Jack,
+            Rank::Queen,
+            Rank::King,
+            Rank::Ace,
         ];
         let mut cards = Vec::with_capacity(52);
         for &suit in &suits {
@@ -216,22 +232,23 @@ impl Deck {
 
 // ── GameState ──────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct GameState {
-    street:  Street,
-    pot:     u64,
-    stacks:  Vec<u64>,
-    to_act:  usize,
-    board:   Vec<Card>,
+    street: Street,
+    pot: u64,
+    stacks: Vec<u64>,
+    to_act: usize,
+    board: Vec<Card>,
 }
 
 impl GameState {
     fn new(num_players: usize, starting_stack: u64) -> Self {
         GameState {
-            street:  Street::Preflop,
-            pot:     0,
-            stacks:  vec![starting_stack; num_players],
-            to_act:  0,
-            board:   Vec::new(),
+            street: Street::Preflop,
+            pot: 0,
+            stacks: vec![starting_stack; num_players],
+            to_act: 0,
+            board: Vec::new(),
         }
     }
 
@@ -265,6 +282,13 @@ fn main() {
     println!("\nKuhn CFR+ average strategies:");
     print_kuhn_plus_strategies(&cfr_plus_nodes);
 
+    let dcfr_nodes = dcfr::train(10_000);
+    println!("\nLeduc DCFR nodes: {}", dcfr_nodes.len());
+    print_dcfr_sample_strategies(&dcfr_nodes);
+
+    let dcfr_parallel_nodes = dcfr_parallel::train_parallel(10_000);
+    println!("DCFR parallel nodes: {}", dcfr_parallel_nodes.len());
+
     // --- Deck デモ ---
     let mut deck = Deck::new();
     println!("Deck: {} cards", deck.remaining());
@@ -280,15 +304,28 @@ fn main() {
 
     // deal_hands で6人に配る: Vec<Hand> の所有権が hands に移る
     let hands = deck.deal_hands(6).unwrap();
-    println!("Dealt {} hands. Remaining: {}", hands.len(), deck.remaining());
+    println!(
+        "Dealt {} hands. Remaining: {}",
+        hands.len(),
+        deck.remaining()
+    );
     for (i, h) in hands.iter().enumerate() {
-        println!("  Player {}: {} (pair={}, suited={})", i + 1, h, h.is_pair(), h.is_suited());
+        println!(
+            "  Player {}: {} (pair={}, suited={})",
+            i + 1,
+            h,
+            h.is_pair(),
+            h.is_suited()
+        );
     }
 
     // --- GameState デモ ---
     let mut gs = GameState::new(6, 10000);
     gs.apply_action(&Action::Raise(300), 0);
-    println!("\nAfter Raise(300): pot={}, stack[0]={}", gs.pot, gs.stacks[0]);
+    println!(
+        "\nAfter Raise(300): pot={}, stack[0]={}",
+        gs.pot, gs.stacks[0]
+    );
 }
 
 fn print_kuhn_strategies(nodes: &std::collections::HashMap<String, cfr::KuhnNode>) {
@@ -309,17 +346,29 @@ fn print_kuhn_plus_strategies(nodes: &std::collections::HashMap<String, cfr_plus
     }
 }
 
+fn print_dcfr_sample_strategies(nodes: &std::collections::HashMap<String, dcfr::DCFRNode>) {
+    let mut keys: Vec<&String> = nodes.keys().collect();
+    keys.sort();
+    for key in keys.into_iter().take(8) {
+        let strategy = nodes[key].get_average_strategy(3);
+        println!(
+            "  {}: a0={:.3}, a1={:.3}, a2={:.3}",
+            key, strategy[0], strategy[1], strategy[2]
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_card_display() {
-        assert_eq!(format!("{}", Card::new(Rank::Ace,   Suit::Spade)),   "As");
-        assert_eq!(format!("{}", Card::new(Rank::King,  Suit::Heart)),   "Kh");
+        assert_eq!(format!("{}", Card::new(Rank::Ace, Suit::Spade)), "As");
+        assert_eq!(format!("{}", Card::new(Rank::King, Suit::Heart)), "Kh");
         assert_eq!(format!("{}", Card::new(Rank::Queen, Suit::Diamond)), "Qd");
-        assert_eq!(format!("{}", Card::new(Rank::Two,   Suit::Club)),    "2c");
-        assert_eq!(format!("{}", Card::new(Rank::Ten,   Suit::Spade)),   "Ts");
+        assert_eq!(format!("{}", Card::new(Rank::Two, Suit::Club)), "2c");
+        assert_eq!(format!("{}", Card::new(Rank::Ten, Suit::Spade)), "Ts");
     }
 
     #[test]
@@ -336,7 +385,7 @@ mod tests {
     #[test]
     fn test_hand_suited() {
         let hand = Hand::new(
-            Card::new(Rank::Ace,  Suit::Spade),
+            Card::new(Rank::Ace, Suit::Spade),
             Card::new(Rank::King, Suit::Spade),
         );
         assert!(!hand.is_pair());
@@ -346,7 +395,7 @@ mod tests {
     #[test]
     fn test_hand_offsuit() {
         let hand = Hand::new(
-            Card::new(Rank::Ace,  Suit::Spade),
+            Card::new(Rank::Ace, Suit::Spade),
             Card::new(Rank::King, Suit::Heart),
         );
         assert!(!hand.is_pair());
@@ -355,11 +404,11 @@ mod tests {
 
     #[test]
     fn test_rank_ordering() {
-        assert!(Rank::Ace   > Rank::King);
-        assert!(Rank::King  > Rank::Queen);
+        assert!(Rank::Ace > Rank::King);
+        assert!(Rank::King > Rank::Queen);
         assert!(Rank::Queen > Rank::Jack);
-        assert!(Rank::Jack  > Rank::Ten);
-        assert!(Rank::Two   < Rank::Three);
+        assert!(Rank::Jack > Rank::Ten);
+        assert!(Rank::Two < Rank::Three);
     }
 
     #[test]
@@ -399,7 +448,7 @@ mod tests {
     #[test]
     fn test_position_display() {
         assert_eq!(format!("{}", Position::BTN), "BTN");
-        assert_eq!(format!("{}", Position::BB),  "BB");
+        assert_eq!(format!("{}", Position::BB), "BB");
         assert_eq!(format!("{}", Position::UTG), "UTG");
     }
 
@@ -482,11 +531,17 @@ mod tests {
         // シャッフル後のカード列が元の順と完全一致する確率は 1/52! ≈ 0
         let original: Vec<String> = {
             let mut d = Deck::new();
-            (0..52).filter_map(|_| d.deal()).map(|c| format!("{}", c)).collect()
+            (0..52)
+                .filter_map(|_| d.deal())
+                .map(|c| format!("{}", c))
+                .collect()
         };
         let shuffled: Vec<String> = {
             let mut d = deck_shuffled;
-            (0..52).filter_map(|_| d.deal()).map(|c| format!("{}", c)).collect()
+            (0..52)
+                .filter_map(|_| d.deal())
+                .map(|c| format!("{}", c))
+                .collect()
         };
         // 52枚の内容（集合）は同じ
         let mut orig_sorted = original.clone();
