@@ -1,8 +1,12 @@
+mod action_abstraction;
+mod card_abstraction;
 mod cfr;
 mod cfr_plus;
 mod dcfr;
 mod dcfr_parallel;
+mod hand_evaluator;
 mod leduc;
+mod nlhe;
 
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -274,6 +278,17 @@ impl GameState {
 }
 
 fn main() {
+    let mut nlhe_rng = thread_rng();
+    let nlhe_state = nlhe::state::NLHEState::new_random(&mut nlhe_rng);
+    let sample_group = card_abstraction::classify_preflop(&nlhe_state.hole_cards[0]);
+    println!(
+        "NLHE core ready: pot={}, street={}, player0_group={}, legal_actions={}",
+        nlhe_state.pot,
+        nlhe_state.street,
+        sample_group,
+        nlhe_state.legal_actions().len()
+    );
+
     let cfr_nodes = cfr::train(100_000);
     println!("Vanilla Kuhn CFR average strategies:");
     print_kuhn_strategies(&cfr_nodes);
