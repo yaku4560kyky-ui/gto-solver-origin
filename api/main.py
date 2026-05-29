@@ -8,13 +8,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+import beta
 import legal
+import stripe_webhook
 from input_validator import validate_card, validate_iterations, validate_seven_cards
 from rate_limit import rate_limit_dependency
 from security import create_access_token, get_password_hash, verify_password
 
 
-app = FastAPI(title="GTO Solver API", version="0.1.0")
+API_VERSION = "0.1.0"
+
+app = FastAPI(title="GTO Solver API", version=API_VERSION)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -40,6 +44,8 @@ app.add_middleware(
 )
 
 app.include_router(legal.router)
+app.include_router(beta.router)
+app.include_router(stripe_webhook.router)
 
 
 class TrainRequest(BaseModel):
@@ -92,8 +98,17 @@ DEMO_PASSWORD_HASH = get_password_hash("gto2024")
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.1.0"}
+def health() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "version": API_VERSION,
+        "services": {
+            "api": "ok",
+            "solver": "available",
+            "beta": "ok",
+            "billing": "configured",
+        },
+    }
 
 
 @app.post("/api/v1/auth/token", response_model=TokenResponse)

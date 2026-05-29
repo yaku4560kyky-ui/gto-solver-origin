@@ -1,6 +1,10 @@
 from fastapi.testclient import TestClient
+import hmac
+from hashlib import sha256
+
 from main import app
 from rate_limit import rate_limiter
+from stripe_webhook import DEFAULT_WEBHOOK_SECRET
 
 
 client = TestClient(app)
@@ -95,3 +99,78 @@ def test_auth_token_invalid():
         data={"username": "demo", "password": "wrong"},
     )
     assert response.status_code == 401
+
+
+def test_health_services():
+    response = client.get("/health")
+    data = response.json()
+    assert response.status_code == 200
+    assert data["services"]["beta"] == "ok"
+    assert data["services"]["billing"] == "configured"
+
+
+def test_beta_waitlist():
+    response = client.post(
+        "/api/v1/beta/waitlist",
+        json={
+            "name": "Ada",
+            "email": "ada@example.com",
+            "company": "Solver Lab",
+            "intended_use": "Testing poker strategy analysis workflows",
+        },
+    )
+    data = response.json()
+    assert response.status_code == 201
+    assert data["status"] == "queued"
+    assert data["email"] == "ada@example.com"
+
+
+def test_beta_feedback():
+    response = client.post(
+        "/api/v1/beta/feedback",
+        json={
+            "email": "tester@example.com",
+            "category": "feature",
+            "message": "Please add deeper preflop reports.",
+        },
+    )
+    data = response.json()
+    assert response.status_code == 201
+    assert data["status"] == "received"
+    assert data["category"] == "feature"
+
+
+def test_stripe_plans():
+    response = client.get("/api/v1/stripe/plans")
+    data = response.json()
+    assert response.status_code == 200
+    assert len(data["plans"]) == 3
+    assert data["plans"][1]["id"] == "pro"
+
+
+def test_stripe_webhook_rejects_bad_signature():
+    response = client.post(
+        "/api/v1/stripe/webhook",
+        json={"type": "checkout.session.completed"},
+        headers={"Stripe-Signature": "bad-signature"},
+    )
+    assert response.status_code == 400
+
+
+def test_stripe_webhook_accepts_valid_signature():
+    payload = b'{"type":"checkout.session.completed"}'
+    signature = hmac.new(
+        DEFAULT_WEBHOOK_SECRET.encode("utf-8"), payload, sha256
+    ).hexdigest()
+    response = client.post(
+        "/api/v1/stripe/webhook",
+        content=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Stripe-Signature": signature,
+        },
+    )
+    data = response.json()
+    assert response.status_code == 200
+    assert data["received"] is True
+    assert data["event_type"] == "checkout.session.completed"
