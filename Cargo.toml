@@ -3,7 +3,12 @@ name = "gto-solver"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "gto_solver"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
+pyo3 = { version = "0.21", features = ["extension-module", "abi3-py39"] }
 rand = "0.8"
 rayon = "1.8"
 
@@ -17,3 +22,7 @@ harness = false
 [[bench]]
 name = "dcfr_bench"
 harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
