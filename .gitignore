@@ -17,3 +17,13 @@ frontend/out/
 
 # Maturin
 target/wheels/
+
+# Local environment and production secrets
+.env
+.env.local
+nginx/ssl/*.pem
+nginx/ssl/*.key
+
+# Runtime data and build artifacts
+api/data/
+*.whl

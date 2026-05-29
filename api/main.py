@@ -15,10 +15,16 @@ from input_validator import validate_card, validate_iterations, validate_seven_c
 from rate_limit import rate_limit_dependency
 from security import create_access_token, get_password_hash, verify_password
 
+try:
+    from api import monitoring
+except ImportError:
+    import monitoring
+
 
 API_VERSION = "0.1.0"
 
 app = FastAPI(title="GTO Solver API", version=API_VERSION)
+monitoring.init_sentry()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -34,6 +40,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(monitoring.RequestLoggingMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

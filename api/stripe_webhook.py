@@ -13,8 +13,9 @@ DEFAULT_WEBHOOK_SECRET = "phase6-demo-webhook-secret"
 
 
 class Plan(BaseModel):
-    id: Literal["starter", "pro", "team"]
+    id: Literal["free", "pro", "team"]
     name: str
+    price_jpy: int
     price_cents: int
     currency: Literal["usd"]
     interval: Literal["month"]
@@ -33,9 +34,10 @@ class WebhookResponse(BaseModel):
 
 PLANS = [
     Plan(
-        id="starter",
-        name="Starter",
-        price_cents=1900,
+        id="free",
+        name="Free",
+        price_jpy=0,
+        price_cents=0,
         currency="usd",
         interval="month",
         features=["Kuhn CFR demo", "Hand evaluator", "Community support"],
@@ -44,6 +46,7 @@ PLANS = [
     Plan(
         id="pro",
         name="Pro",
+        price_jpy=2980,
         price_cents=4900,
         currency="usd",
         interval="month",
@@ -53,6 +56,7 @@ PLANS = [
     Plan(
         id="team",
         name="Team",
+        price_jpy=5980,
         price_cents=14900,
         currency="usd",
         interval="month",
@@ -64,6 +68,27 @@ PLANS = [
 
 def _expected_signature(payload: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), payload, sha256).hexdigest()
+
+
+def verify_stripe_signature(payload: bytes, sig_header: str, secret: str) -> bool:
+    if not secret:
+        return True
+
+    parts = {}
+    for item in sig_header.split(","):
+        key, separator, value = item.partition("=")
+        if separator:
+            parts[key] = value
+
+    timestamp = parts.get("t")
+    signature = parts.get("v1")
+    if timestamp and signature:
+        signed_payload = timestamp.encode("utf-8") + b"." + payload
+        expected = hmac.new(secret.encode("utf-8"), signed_payload, sha256).hexdigest()
+        return hmac.compare_digest(signature, expected)
+
+    expected = _expected_signature(payload, secret)
+    return hmac.compare_digest(sig_header, expected)
 
 
 @router.get("/plans", response_model=PlansResponse)
@@ -78,9 +103,10 @@ async def stripe_webhook(
 ) -> WebhookResponse:
     payload = await request.body()
     secret = os.getenv("STRIPE_WEBHOOK_SECRET", DEFAULT_WEBHOOK_SECRET)
-    expected = _expected_signature(payload, secret)
 
-    if stripe_signature != expected:
+    if not stripe_signature or not verify_stripe_signature(
+        payload, stripe_signature, secret
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid Stripe webhook signature",

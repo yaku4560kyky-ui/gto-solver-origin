@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
 import hmac
+import os
 from hashlib import sha256
+
+from fastapi.security import HTTPAuthorizationCredentials
 
 from main import app
 from rate_limit import rate_limiter
@@ -174,3 +177,30 @@ def test_stripe_webhook_accepts_valid_signature():
     assert response.status_code == 200
     assert data["received"] is True
     assert data["event_type"] == "checkout.session.completed"
+
+
+def test_env_example_exists():
+    assert os.path.exists(".env.example")
+
+
+def test_docker_compose_exists():
+    assert os.path.exists("docker-compose.yml")
+
+
+def test_supabase_auth_dev_mode():
+    from api.supabase_auth import verify_supabase_token
+
+    credentials = HTTPAuthorizationCredentials(
+        scheme="Bearer",
+        credentials="any-token",
+    )
+    result = verify_supabase_token(credentials)
+    assert result["sub"] == "dev-user"
+
+
+def test_stripe_plans_structure():
+    response = client.get("/api/v1/stripe/plans")
+    plans = response.json()["plans"]
+    assert plans[0]["id"] == "free"
+    assert plans[1]["price_jpy"] == 2980
+    assert plans[2]["price_jpy"] == 5980
