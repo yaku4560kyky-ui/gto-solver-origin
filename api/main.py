@@ -1,3 +1,4 @@
+import time as _time
 from typing import Dict, List
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -11,6 +12,7 @@ from starlette.responses import Response
 import beta
 import legal
 import stripe_webhook
+from api import solver_cache
 from input_validator import validate_card, validate_iterations, validate_seven_cards
 from rate_limit import rate_limit_dependency
 from security import create_access_token, get_password_hash, verify_password
@@ -62,6 +64,9 @@ class TrainRequest(BaseModel):
 class StrategyResponse(BaseModel):
     strategies: Dict[str, List[float]]
     iterations: int
+    cached: bool = False
+    elapsed_ms: float
+    result_id: int
 
 
 class HandEvalRequest(BaseModel):
@@ -143,6 +148,17 @@ async def login_for_access_token(
 def solve_kuhn_cfr(request: TrainRequest) -> StrategyResponse:
     validate_iterations(request.iterations)
 
+    cached_result = solver_cache.get("kuhn-cfr", request.iterations)
+    if cached_result is not None:
+        return StrategyResponse(
+            strategies=cached_result["strategies"],
+            iterations=cached_result["iterations"],
+            cached=True,
+            elapsed_ms=cached_result["elapsed_ms"],
+            result_id=cached_result["id"],
+        )
+
+    started_at = _time.perf_counter()
     try:
         import gto_solver
 
@@ -150,7 +166,20 @@ def solve_kuhn_cfr(request: TrainRequest) -> StrategyResponse:
     except ImportError:
         strategies = MOCK
 
-    return StrategyResponse(strategies=strategies, iterations=request.iterations)
+    elapsed_ms = (_time.perf_counter() - started_at) * 1000
+    result_id = solver_cache.save(
+        "kuhn-cfr",
+        request.iterations,
+        strategies,
+        elapsed_ms,
+    )
+    return StrategyResponse(
+        strategies=strategies,
+        iterations=request.iterations,
+        cached=False,
+        elapsed_ms=elapsed_ms,
+        result_id=result_id,
+    )
 
 
 @app.post(
@@ -161,6 +190,17 @@ def solve_kuhn_cfr(request: TrainRequest) -> StrategyResponse:
 def solve_kuhn_cfr_plus(request: TrainRequest) -> StrategyResponse:
     validate_iterations(request.iterations)
 
+    cached_result = solver_cache.get("kuhn-cfr-plus", request.iterations)
+    if cached_result is not None:
+        return StrategyResponse(
+            strategies=cached_result["strategies"],
+            iterations=cached_result["iterations"],
+            cached=True,
+            elapsed_ms=cached_result["elapsed_ms"],
+            result_id=cached_result["id"],
+        )
+
+    started_at = _time.perf_counter()
     try:
         import gto_solver
 
@@ -168,7 +208,41 @@ def solve_kuhn_cfr_plus(request: TrainRequest) -> StrategyResponse:
     except ImportError:
         strategies = MOCK
 
-    return StrategyResponse(strategies=strategies, iterations=request.iterations)
+    elapsed_ms = (_time.perf_counter() - started_at) * 1000
+    result_id = solver_cache.save(
+        "kuhn-cfr-plus",
+        request.iterations,
+        strategies,
+        elapsed_ms,
+    )
+    return StrategyResponse(
+        strategies=strategies,
+        iterations=request.iterations,
+        cached=False,
+        elapsed_ms=elapsed_ms,
+        result_id=result_id,
+    )
+
+
+@app.get("/api/v1/cache/")
+def list_cache() -> dict[str, object]:
+    return {"results": solver_cache.list_all()}
+
+
+@app.get("/api/v1/cache/{result_id}")
+def get_cache_result(result_id: int) -> dict[str, object]:
+    result = solver_cache.get_by_id(result_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Cache result not found")
+    return result
+
+
+@app.delete("/api/v1/cache/{result_id}")
+def delete_cache_result(result_id: int) -> dict[str, bool]:
+    deleted = solver_cache.delete(result_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Cache result not found")
+    return {"deleted": True}
 
 
 @app.post(

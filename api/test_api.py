@@ -5,12 +5,19 @@ from hashlib import sha256
 
 from fastapi.security import HTTPAuthorizationCredentials
 
+from api import solver_cache
 from main import app
 from rate_limit import rate_limiter
 from stripe_webhook import DEFAULT_WEBHOOK_SECRET
 
 
 client = TestClient(app)
+
+
+def _clear_cache_entry(solver_type: str, iterations: int) -> None:
+    cached_result = solver_cache.get(solver_type, iterations)
+    if cached_result is not None:
+        solver_cache.delete(cached_result["id"])
 
 
 def test_health():
@@ -204,3 +211,102 @@ def test_stripe_plans_structure():
     assert plans[0]["id"] == "free"
     assert plans[1]["price_jpy"] == 2980
     assert plans[2]["price_jpy"] == 5980
+
+
+def test_cache_miss_then_save():
+    iterations = 2001
+    _clear_cache_entry("kuhn-cfr", iterations)
+
+    response = client.post("/api/v1/solve/kuhn-cfr", json={"iterations": iterations})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["cached"] is False
+    assert data["iterations"] == iterations
+    assert data["elapsed_ms"] >= 0
+    assert isinstance(data["result_id"], int)
+
+    cached_result = solver_cache.get("kuhn-cfr", iterations)
+    assert cached_result is not None
+    assert cached_result["id"] == data["result_id"]
+
+
+def test_cache_hit_second_request():
+    iterations = 2002
+    _clear_cache_entry("kuhn-cfr", iterations)
+
+    first_response = client.post(
+        "/api/v1/solve/kuhn-cfr",
+        json={"iterations": iterations},
+    )
+    second_response = client.post(
+        "/api/v1/solve/kuhn-cfr",
+        json={"iterations": iterations},
+    )
+    first_data = first_response.json()
+    second_data = second_response.json()
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_data["cached"] is False
+    assert second_data["cached"] is True
+    assert second_data["result_id"] == first_data["result_id"]
+    assert second_data["strategies"] == first_data["strategies"]
+
+
+def test_cache_list():
+    iterations = 2003
+    _clear_cache_entry("kuhn-cfr-plus", iterations)
+    solve_response = client.post(
+        "/api/v1/solve/kuhn-cfr-plus",
+        json={"iterations": iterations},
+    )
+
+    response = client.get("/api/v1/cache/")
+    data = response.json()
+
+    assert solve_response.status_code == 200
+    assert response.status_code == 200
+    assert "results" in data
+    assert any(
+        result["id"] == solve_response.json()["result_id"]
+        for result in data["results"]
+    )
+
+
+def test_cache_get_by_id():
+    iterations = 2004
+    _clear_cache_entry("kuhn-cfr", iterations)
+    solve_response = client.post(
+        "/api/v1/solve/kuhn-cfr",
+        json={"iterations": iterations},
+    )
+    result_id = solve_response.json()["result_id"]
+
+    response = client.get(f"/api/v1/cache/{result_id}")
+    data = response.json()
+
+    assert solve_response.status_code == 200
+    assert response.status_code == 200
+    assert data["id"] == result_id
+    assert data["solver_type"] == "kuhn-cfr"
+    assert data["iterations"] == iterations
+    assert "strategies" in data
+
+
+def test_cache_delete():
+    iterations = 2005
+    _clear_cache_entry("kuhn-cfr-plus", iterations)
+    solve_response = client.post(
+        "/api/v1/solve/kuhn-cfr-plus",
+        json={"iterations": iterations},
+    )
+    result_id = solve_response.json()["result_id"]
+
+    response = client.delete(f"/api/v1/cache/{result_id}")
+    get_response = client.get(f"/api/v1/cache/{result_id}")
+
+    assert solve_response.status_code == 200
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert get_response.status_code == 404
